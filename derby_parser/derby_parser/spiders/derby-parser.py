@@ -6,7 +6,7 @@ Luggage = namedtuple("Luggage", ["name", "int_code", "price", "specs"])
 
 Specs = namedtuple("Specs", [
     "width", "length", "height", "volume", "wheels", "weight", "features",
-    "meterial", "warranty",
+    "material", "warranty", "origin", "volume_range", "scope", "size"
 ])
 
 class DerbyParser(scrapy.Spider):
@@ -36,19 +36,14 @@ class DerbyParser(scrapy.Spider):
             "https://derby.ua/v-dorogu/chemodany/ruchnaja-klad/page-18",
         ]
         for url in urls:
-            yield scrapy.Request(url=url, callback=self.parse_page)
+            yield scrapy.Request(url=url, callback=self.parse)
 
-        for url in self.item_urls:
-            self.items.append(
-                scrapy.Request(url=url, callback=self.parse_item)
+
+    def parse(self, response):
+        for item in response.xpath("//a[@class='product-item']"):
+            yield scrapy.Request(
+                url=item.xpath("@href").get(), callback=self.parse_item
             )
-
-        # TODO Write everyting to CSV
-
-
-    def parse_page(self, response):
-        for item in response.xpath("a[@class='product-item']"):
-            self.item_urls.append(item.xpath("@href").get())
 
     def parse_item(self, response):
         title = response.css("h1::text").get()
@@ -57,20 +52,36 @@ class DerbyParser(scrapy.Spider):
         int_code = parsed[0] if parsed else ''
 
         price = response.css("div.productMainInfo span.price-new")
-        if not discount_price:
+        if not price:
             price = response.css("div.productMainInfo span.priceUAH")
-        price = discount_price.css("::text").get()
-        price = float(price)
+        price = price.css("::text").get()
+        price = float(price) if price else price
 
-        specs = parse_specs(response)
-        # TODO Create complete luggage item
+        specs = self.parse_specs(response)
         luggage = Luggage(
             name=title, int_code=int_code, price=price, specs=specs
         )
-        return luggage
+        yield {
+            "title": title,
+            "int_code": int_code,
+            "price": price,
+            "width": specs.width,
+            "length": specs.length,
+            "height": specs.height,
+            "weight": specs.weight,
+            "warranty": specs.warranty,
+            "wheels no": specs.wheels,
+            "origin": specs.origin,
+            "material": specs.material,
+            "volume range": specs.volume_range,
+            "features": specs.features,
+            "scope": specs.scope,
+            "size": specs.size,
+            "volume": specs.volume,
+        }
 
 
-    def parse_specs(response):
+    def parse_specs(self, response):
         width = 0
         length = 0
         height = 0
@@ -88,45 +99,60 @@ class DerbyParser(scrapy.Spider):
         for specs in response.xpath("//div[@class='productSpecification']//li"):
             header = specs.xpath("span/text()")[0].extract().strip()
             data = specs.xpath("span/text()")[1].extract()
-            print(f"-> {header}\n--> {data}")
+            # print(f"-> {header}\n--> {data}")
 
             if header == "Розміри (см)":
-                width, length, height = get_luggage_dimension(data)
+                width, length, height = self.get_luggage_dimension(data)
 
             if header == "Вага (кг)":
-                pass
+                weight = data
 
             if header == "Гарантія":
-                pass
+                warranty = data
 
             if header == "Кількість колес":
-                pass
+                wheels_no = data
 
             if header == "Країна бренду":
-                pass
+                origin = data
 
             if header == "Матеріал":
-                pass
+                material = data
 
             if header == "Об'єм (літрів)":
-                pass
+                volume_range = data
 
             if header == "Оснащення":
-                pass
+                features = data
 
             if header == "Призначення":
-                pass
+                scope = data
 
             if header == "Розмір":
-                pass
+                size = data
 
             if  header == "Об'єм (л)":
-                pass
+                volume = data
 
         specs = Specs(
-            width=width, length=length, height=height, weigth=weigth,
-            warranty=warranty, wheels=wheels, origin=origin, material=material,
+            width=width, length=length, height=height, weight=weight,
+            warranty=warranty, wheels=wheels_no, origin=origin, material=material,
             volume_range=volume_range, features=features, scope=scope,
             size=size, volume=volume
         )
         return specs
+
+
+    def get_luggage_dimension(self, data):
+        longest = 0
+        medium = 0
+        smallest = 0
+        m = re.search("([\d.]+)\sx\s([\d.]+)\sx\s([\d.]+)", data)
+        if not m:
+            return longest, medium, smallest
+        vals = [
+            float(m.groups()[0]), float(m.groups()[1]), float(m.groups()[2])
+        ]
+        vals.sort()
+        return vals[0], vals[1], vals[2]
+
